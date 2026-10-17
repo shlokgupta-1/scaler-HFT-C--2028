@@ -2,7 +2,6 @@
 
 **Student:** Shlok Gupta | **SST Roll Number:** 24BCS10322
 **Course:** Scaler HFT C++ 2028  
-**Deadline:** 17th October 2026, 11:59 PM  
 **Language:** C++17
 
 ---
@@ -224,15 +223,19 @@ Exit code: 0
 
 ## Performance Results
 
-> Measured on: Windows 11, g++ 16.2.0 (MSYS2 UCRT64), compiled with `-O2`  
-> Each run = 1 000 000 ops (seed=42). 5 runs, median reported.
 
-| Metric | Implementation A | Implementation B | Implementation C |
-|--------|-----------------|-----------------|-----------------|
-| Total time (ms) | **389.10** | **326.91** | **226.24** |
-| ns / add | **333.75** | **252.59** | **156.70** |
-| ns / cancel | **560.53** | **541.36** | **386.91** |
-| ns / BBO | **34.09** | **34.56** | **31.71** |
+> **Benchmark environment:** Kali Linux, x86-64; AMD Ryzen AI 9 HX 375 with Radeon 890M; GCC 16.2.0; CMake 4.3.4; Release build.
+>
+> **Workload:** 1,000,000 base operations, fixed seed 42. Each benchmark implementation is run five times. The executable reports the median run.
+
+|| Metric | Implementation A | Implementation B | Implementation C |
+|---|---:|---:|---:|
+| Mean total time (ms) | 171.06 | 129.63 | **85.70** |
+| Standard deviation (ms) | 28.95 | 11.89 | **9.00** |
+| Mean ADD latency (ns) | 135.13 | 99.02 | **47.27** |
+| Mean CANCEL latency (ns) | 249.83 | 199.16 | **162.26** |
+| Mean BBO latency (ns) | 21.97 | **16.98** | 17.58 |
+| Relative speedup vs. A | 1.00× | 1.32× | **2.00×** |
 | IPC | _(Linux perf required)_ | _(Linux perf required)_ | _(Linux perf required)_ |
 | Branch misses (%) | _(Linux perf required)_ | _(Linux perf required)_ | _(Linux perf required)_ |
 | L1-dcache-load-misses | _(Linux perf required)_ | _(Linux perf required)_ | _(Linux perf required)_ |
@@ -243,98 +246,97 @@ Exit code: 0
 
 ## perf Analysis
 
-> Paste your `perf stat` outputs here after running on Linux.
+The following values were collected using Linux `perf stat -r 5`. IPC and miss rates below are calculated from the recorded counter totals.
 
-### Implementation A — perf stat
-```
-<paste perf stat output for A>
-```
+### Hardware Counter Results
 
-### Implementation B — perf stat
-```
-<paste perf stat output for B>
-```
+| Metric | Implementation A | Implementation B | Implementation C |
+|---|---:|---:|---:|
+| CPU cycles | 4,094,862,698 | 4,072,575,201 | 2,378,156,275 |
+| Instructions | 3,122,204,017 | 3,300,682,639 | 2,619,348,944 |
+| Instructions per cycle (IPC) | 0.762 | 0.810 | **1.101** |
+| Branches | 697,577,945 | 699,053,414 | 551,795,274 |
+| Branch misses | 39,048,019 | 40,140,147 | **7,370,637** |
+| Branch-miss rate | 5.60% | 5.74% | **1.34%** |
+| Cache references | 111,267,511 | 137,242,667 | 60,106,843 |
+| Cache misses | 18,554,642 | 12,326,100 | **12,086,599** |
+| Cache-miss/reference ratio | 16.68% | **8.98%** | 20.11% |
+| `perf` elapsed time (s) | 0.988 | 0.935 | **0.585** |
 
-### Implementation C — perf stat
-```
-<paste perf stat output for C>
-```
+### Interpretation
+
+**Instructions per cycle:** C recorded approximately 1.10 IPC, compared with 0.81 for B and 0.76 for A. This is consistent with C's lower measured cycle count, but IPC alone does not explain the cause of the performance difference.
+
+**Branch prediction:** C recorded the lowest branch-miss rate (1.34%), compared with 5.60% for A and 5.74% for B. This indicates fewer branch misses in this run; additional profiling would be needed to identify the specific branches responsible.
+
+**Cache behavior:** C had fewer absolute cache misses than A and B, but its cache-miss/reference ratio was highest at 20.11%. The generic `cache-references` and `cache-misses` events are processor-dependent and are not exact L1/L2 data-cache miss rates.
+
+**Measurement scope:** The `perf stat` elapsed time covers the complete executable, including startup, workload generation, and benchmark repetitions. It is not directly comparable to the benchmark's single-run total time.
+
+**Limitations:** The supplied measurements do not include specific L1 data-cache miss, DTLB miss, page-fault, or call-stack profile results. Do not infer or invent those values.
 
 ---
 
 ## Performance Report
 
-### 11.1 Which implementation is fastest?
+### 1. Which Implementation Is Fastest?
 
-**Expected hypothesis** (to be confirmed by your measurements):
+Implementation C achieved the best overall results in the recorded benchmark.
 
-Implementation **C** (fixed-size array) should be fastest overall:
-- `add_order`: C wins — O(1) direct array write vs. O(log N) tree walk (A) or binary-search + shift (B).
-- `cancel_order`: C wins — O(1) slot decrement + O(1) cursor read vs. O(log N) (A) and O(N) shift (B).
-- `get_bbo`: B and C tie at O(1); A is slower at O(log N).
+| Comparison | Result |
+|---|---|
+| C vs. A | 2.00× faster by mean total execution time |
+| C vs. B | 1.51× faster by mean total execution time |
+| ADD latency | C is fastest at 47.27 ns |
+| CANCEL latency | C is fastest at 162.26 ns |
+| BBO latency | B is fastest at 16.98 ns |
 
-**Why C is faster:** The flat array is ~80 KB and likely fits in L2 cache. Every operation is a single array index — no pointer chasing, no tree navigation, no element shifting. The CPU's hardware prefetcher can predict accesses efficiently.
+The results are consistent with the benefits of a fixed-size tick-indexed array: price-level updates use direct indexing rather than tree traversal or sorted-vector element shifting. The cached best-bid and best-ask cursors also make ordinary BBO reads constant-time.
 
----
+The advantage is workload-dependent. Cursor repair can require scanning price levels when the best level becomes empty, and this benchmark does not represent every possible market workload.
 
-### 11.2 Branch Prediction
+#### 2. Branch Prediction
 
-**Expected:** Implementation A has the most branch misses because red-black tree traversal follows unpredictable pointer paths (left/right child, rotation decisions) whose outcomes depend on the data distribution. The tree's conditional branches are hard for the branch predictor to learn.
+Implementation C recorded a 1.34% branch-miss rate, substantially below A's 5.60% and B's 5.74%. This may reflect differences in control flow and data-structure traversal, but the counter results alone do not identify individual branch sites responsible for the difference.
 
-Implementation C has the fewest: the dominant path is `levels_[slot] += qty` with no branches.
+### 3. Cache Behavior
 
----
+| Implementation | Memory access pattern |
+|---|---|
+| A (`std::map`) | Tree traversal can follow separately allocated nodes, potentially reducing locality |
+| B (sorted vector) | Contiguous storage; reads can benefit from spatial locality, while insertions and removals shift elements |
+| C (fixed array) | Contiguous tick-indexed level storage with direct indexing |
 
-### 11.3 Cache Behavior
+C recorded 12.09 million cache misses, compared with 18.55 million for A and 12.33 million for B. However, C's cache-miss/reference ratio was the highest at 20.11%. Therefore, the measured data does **not** support claiming that C had the lowest cache-miss rate. Cache-level-specific profiling would be needed to draw stronger conclusions.
 
-| Impl | Memory access pattern |
-|------|-----------------------|
-| A (`std::map`) | Pointer-chasing through tree nodes scattered on the heap → many L1/L2 misses |
-| B (sorted vector) | Contiguous array — great spatial locality for reads; insert/erase touches contiguous memory |
-| C (fixed array) | Single large contiguous array; accessed by direct index → prefetcher-friendly, few cache misses |
+### 4. Page Faults
 
-Implementation A is expected to have the highest cache miss rate due to tree pointer chasing. Each node is a separate heap allocation at an unpredictable address.
+No page-fault counter values were supplied in the recorded results. Therefore, this report makes no measured comparison of page faults between implementations. The fixed level array avoids per-level tree-node allocations, but all implementations still use an `unordered_map` for order storage.
 
-Implementation C accesses the same ~80 KB array for every operation. After a warm-up period the entire array can reside in L2 or L3 cache.
+### 5. Production Choice
 
----
-
-### 11.4 Page Faults
-
-Implementation A will likely have the most page faults because `std::map` allocates a separate heap node for each new price level. Over 1 000 000 operations touching up to 10 000 distinct levels, many allocator pages are touched for the first time.
-
-Implementation C allocates its level array **once** at construction (80 KB). After that, no further page faults occur from level access. Orders are still heap-allocated (via `unordered_map`) but that is identical across all three.
-
----
-
-### 11.5 Production Choice
-
-**Choice: Implementation C**
-
-In a real HFT system, I would deploy Implementation C for the following reasons:
+**Preferred implementation for this workload: Implementation C.**
 
 | Factor | Reasoning |
-|--------|-----------|
-| **Latency** | O(1) add and cancel; O(1) BBO — lowest tail latency because there is no tree traversal or element shifting |
-| **Predictability** | The fixed array means memory layout is known at startup; no GC pauses, no allocator jitter. The only variability is cursor repair, which is rare |
-| **Memory usage** | The 80 KB level array is small and fits in cache. Unlike Implementation A, there is no per-level heap allocation |
-| **Cache behaviour** | Contiguous array → hardware prefetcher works well; few cache misses after warm-up |
-| **Complexity** | Slightly more complex than A to reason about (cursor repair), but the design is explainable and auditable |
-| **Maintainability** | The code is ~120 lines, self-contained, and the cursor invariant is easy to test |
+|---|---|
+| Measured latency | Lowest mean total, ADD, and CANCEL latency in the supplied benchmark |
+| BBO reads | Constant-time cached best-bid and best-ask access |
+| Storage | Fixed-size price-level array avoids tree-node allocations for price levels |
+| Predictability | Direct indexing avoids tree traversal and sorted-vector shifting on ordinary updates |
+| Trade-offs | Requires a bounded tick range and correct best-price cursor repair |
 
-Implementation B has the advantage of O(1) BBO and cache-friendly vector reads, but its O(N) insert/erase is unacceptable for HFT where microseconds matter and cancel bursts are common.
+Implementation B remains competitive for BBO reads and offers contiguous storage. Implementation A provides a conventional ordered-map design with dynamic price-level storage. The measured ranking should be revisited for different instruments, price distributions, and cancellation patterns.
 
-Implementation A is the simplest to reason about but has the worst cache behaviour. It is a fine choice for a first prototype but not for production.
+
+### 6. What Would You Try Next?
+
+1. Calibrate timing overhead and report latency percentiles such as p50, p95, p99, and p99.9.
+2. Benchmark different order distributions, price ranges, and cancellation patterns.
+3. Capture hardware-specific L1/L2 cache and TLB events where supported.
+4. Use `perf record` and call-stack profiling to identify hot functions.
+5. Investigate preallocated order storage and object pools to reduce allocation overhead.
+6. Evaluate active-price indexing for Implementation C to reduce depth-query scans across empty ticks.
+7. Repeat measurements with controlled CPU frequency and reduced background activity.
+8. Evaluate multi-threaded extensions separately, with explicit synchronization and correctness tests.
 
 ---
-
-### 11.6 What Would You Try Next?
-
-1. **Integer ticks everywhere** — Already done in this implementation, but can be propagated to the public API to avoid `tick_to_price()` calls on hot paths.
-2. **Intrusive linked list for orders per level** — Instead of `unordered_map`, use a free-list pool of order nodes so cancellation touches only cache-warm memory.
-3. **Object pool for `unordered_map` buckets** — The hash map bucket allocation can cause cache misses; a pre-allocated pool fixes this.
-4. **Branch reduction in `get_bids`/`get_asks`** — Use SIMD to scan the 80 KB level array for non-zero entries faster than scalar loops.
-5. **Sorted index set for Implementation C** — Add a small `std::set<int>` of active ticks to make `get_bids(D)` exactly O(D) without scanning gaps in the array.
-6. **`__builtin_expect`** — Annotate the `best_bid_` repair branch as unlikely so the compiler lays out the hot path in a straight line.
-7. **Cache-line alignment** — Align `levels_[]` to 64 bytes and pad the `best_bid_`/`best_ask_` cursors to their own cache line to avoid false sharing (useful if we add a reader thread later).
-8. **Lock-free snapshot** — For the BBO, a `std::atomic<uint64_t>` packing bid+ask ticks allows a reader to get the BBO without any lock in a multi-threaded extension.
