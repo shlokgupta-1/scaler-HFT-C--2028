@@ -228,20 +228,18 @@ Exit code: 0
 >
 > **Workload:** 1,000,000 base operations, fixed seed 42. Each benchmark implementation is run five times. The executable reports the median run.
 
-|| Metric | Implementation A | Implementation B | Implementation C |
+| Metric | Implementation A | Implementation B | Implementation C |
 |---|---:|---:|---:|
 | Mean total time (ms) | 171.06 | 129.63 | **85.70** |
 | Standard deviation (ms) | 28.95 | 11.89 | **9.00** |
 | Mean ADD latency (ns) | 135.13 | 99.02 | **47.27** |
 | Mean CANCEL latency (ns) | 249.83 | 199.16 | **162.26** |
 | Mean BBO latency (ns) | 21.97 | **16.98** | 17.58 |
-| Relative speedup vs. A | 1.00× | 1.32× | **2.00×** |
-| IPC | _(Linux perf required)_ | _(Linux perf required)_ | _(Linux perf required)_ |
-| Branch misses (%) | _(Linux perf required)_ | _(Linux perf required)_ | _(Linux perf required)_ |
-| L1-dcache-load-misses | _(Linux perf required)_ | _(Linux perf required)_ | _(Linux perf required)_ |
-| Cache misses | _(Linux perf required)_ | _(Linux perf required)_ | _(Linux perf required)_ |
-| Page faults | _(Linux perf required)_ | _(Linux perf required)_ | _(Linux perf required)_ |
-
+| IPC | 0.762 | 0.810 | **1.101** |
+| Branch-miss rate (%) | 5.60 | 5.74 | **1.34** |
+| L1 data-cache load misses | Not measured | Not measured | Not measured |
+| Cache misses | 18,554,642 | 12,326,100 | **12,086,599** |
+| Page faults | Not measured | Not measured | Not measured |
 ---
 
 ## perf Analysis
